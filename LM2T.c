@@ -26,7 +26,7 @@ int main() {
 
     if (Form == 0) {
         printf("You selected KNF.\n");
-        
+    
     } else if (Form == 1) {
         printf("You selected DNF.\n");
         
