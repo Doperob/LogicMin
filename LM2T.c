@@ -1,0 +1,31 @@
+#include <stdio.h>
+#include <string.h>
+
+int main() {
+    int vars;
+    int Form;
+    int i;
+    char Term[2][64];
+
+     printf("Enter number of variables:\n");
+    scanf_s("%d", &vars);
+    for (i = 0; i < 2; i++) {
+        do {
+            printf("Enter term %d:\n", i);
+            scanf_s("%63s", &Term[i][0], 64);
+        } while (strlen(Term[i]) != vars);
+    }
+    printf("Enter 0 for KNF or 1 for DNF:\n ");
+    scanf_s("%d", &Form);
+
+    if (Form == 0) {
+        printf("You selected KNF.\n");
+        
+    } else if (Form == 1) {
+        printf("You selected DNF.\n");
+        
+    } else {
+        printf("Invalid selection. Please enter 0 or 1.\n");
+    }
+    return 0;
+}
