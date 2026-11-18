@@ -13,6 +13,9 @@ int main() {
         do {
             printf("Enter term %d:\n", i);
             scanf_s("%63s", &Term[i][0], 64);
+            if(strlen(Term[i]) != vars) {
+                printf("Invalid term length. Please enter a term with %d variables.\n", vars);
+            }
         } while (strlen(Term[i]) != vars);
     }
     printf("Enter 0 for KNF or 1 for DNF:\n ");
