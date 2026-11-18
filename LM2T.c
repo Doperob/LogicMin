@@ -4,12 +4,15 @@
 int main() {
     int vars;
     int Form;
+    int Anzahl;
     int i;
-    char Term[2][64];
+    char Term[100][64]; // Assuming a maximum of 100 terms
 
      printf("Enter number of variables:\n");
     scanf_s("%d", &vars);
-    for (i = 0; i < 2; i++) {
+    printf("Enter number of terms:(max 100)\n");
+    scanf_s("%d", &Anzahl);
+    for (i = 0; i < Anzahl; i++) {
         do {
             printf("Enter term %d:\n", i);
             scanf_s("%63s", &Term[i][0], 64);
