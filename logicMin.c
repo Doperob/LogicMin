@@ -3,52 +3,48 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <sys/_types/_u_int8_t.h>
 
-int parse(const char *term, int *terms,int _count, int *mem, int spot, int vars, int index, int start, int replace){
-  int length = strlen(term);
-  if (vars != length){
-    printf("wrong number of variables used in specified terms\n");
-    return -1;
-  }
-  
-
-  for (int i=0;i<spot;i++){
-    if (i==spot-1){
-      terms[index++] = replace;
-    }else{
-      terms[index++] = mem[i];
+// expands all terms to min/max terms
+// then saves into array as int
+int parse(const char *term, u_int8_t *terms, int vars, int index) {
+    if (strlen(term)!=vars){
+        printf("term size does not fit specified variable count\n");
+        return -1;
     }
-  }
-  
-  for (int i=start; i<vars; i++){
-    if (term[i] == '0'){
-      terms[index++] = 0;
-      mem[i] = 0;
-    }else if (term[i] == '1'){
-      terms[index++] = 1;
-      mem[i] = 1;
-    }else if (term[i] == '_'){
-      _count-=1;
-      terms[index++] = replace;
-      mem[i] = replace;
-      if (_count == 0){
-        spot = i+1;
-        index = parse(term,terms,_count,mem,spot,vars,index,i+1,1);
-      }else{
-        index = parse(term,terms,_count,mem,spot,vars,index,i+1,0);
-        index = parse(term,terms,_count,mem,spot,vars,index,i+1,1);
-      }
+    int i;
+    for (i = 0; i < vars; i++) {
+        if (term[i] == '_') break;
+        if (term[i] != '_' && term[i] != '1' && term[i] != '0'){
+            printf("unknown char\n");
+            return -1;
+        }
     }
-  }
-  return index;
+    if (i == vars) {
+        for (int x=0;x<vars;x++) {
+            terms[index++] = term[x] - '0';
+        }
+        return index;
+    }
+    
+    char modified[32];
+    strcpy(modified, term);
+    modified[i] = '0';
+    index = parse(modified, terms, vars, index);
+    modified[i] = '1';
+    index = parse(modified, terms, vars, index);
+    return index;
 }
 
 // helpers
-void printout(const int *terms,int count){
+void printout(const u_int8_t *terms,int count){
   for (int i=0;i<count;i++){
     printf("%d",terms[i]);
   }
+   printf("\n");
 }
+
+
 
 // first param is num of variables
 // second param is 1 for DNF and 0 for KNF
@@ -65,18 +61,11 @@ int main(int argc,char *argv[]){
 
   int vars = atoi(argv[1]);
   int type = atoi(argv[2]);
-  int terms[100] = {0};
-  int mem[vars];
+  u_int8_t terms[8192] = {0};
   int index = 0;
 
   for (int i=3;i<argc;i++) {
-    int _count = 0;
-    for (int x=0;x<vars;x++){
-      if (argv[i][x] == '_'){
-        _count++;
-      }
-    }
-    index = parse(argv[i],terms,_count,mem,0,vars,index,0,0);
+    index = parse(argv[i],terms,vars,index);
     if (index == -1){
       return -1;
     }
