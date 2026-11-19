@@ -1,9 +1,7 @@
-#include <stddef.h>
-#include <stdint.h>
 #include <string.h>
+#include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
-#include <sys/_types/_u_int8_t.h>
 
 // expands all terms to min/max terms
 // then saves into array as int
@@ -44,7 +42,32 @@ void printout(const u_int8_t *terms,int count){
    printf("\n");
 }
 
+// implicant / implicat stuct to save the minimized terms 
+// (-1 for don't care)
+struct {
+    int term[32];
+    bool minimized;
+    bool minimizing;
+} Im;
 
+// check for difference between two terms by one
+bool diff(const u_int8_t *term1, const u_int8_t *term2, int vars, int *diffIndex){
+    int diffCount = 0;
+    for (int i=0;i<vars;i++){
+        if (term1[i] == term2[i]){
+            diffCount++;
+            *diffIndex = i;
+        }
+    }
+    return (diffCount==1);
+}
+
+// Quine-McCluskey minimization
+int quineMcCluskey(const u_int8_t *terms, int count, int vars){
+    int numMinTerms = count/vars;
+    
+    return 0;
+}
 
 // first param is num of variables
 // second param is 1 for DNF and 0 for KNF
