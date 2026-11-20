@@ -2,6 +2,78 @@
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <ctype.h>
+
+// implicant / implicat stuct to save the minimized terms 
+// (2 for don't care)
+typedef struct {
+    u_int8_t term[16];
+    bool essential;
+} Im;
+// solution memory for recursive optimisation
+typedef struct {
+    int count;
+    bool selection[256];
+} Solution;
+
+// helpers
+// prints the terms array
+void printout(const u_int8_t *terms, int count){
+  for (int i=0;i<count;i++){
+    printf("%d",terms[i]);
+  }
+   printf("\n");
+}
+
+// nicely prints the finished terms for DNF and KNF
+void printdone(const Im *ims, int imsCount, int type, const char *varNames, int vars){
+    bool firstTerm = true;
+    for (int i = 0; i < imsCount; i++){
+        if (!type) {
+            printf("(");
+        }
+        bool firstLiteral = true;
+        for (int x = 0; x < vars; x++){
+            if (ims[i].term[x] != 2) {
+                if (!firstLiteral) {
+                    if (!type) {
+                        printf("+");
+                    }
+                }
+                firstLiteral = false;
+                char var = varNames[x];
+                if (type == 1) {
+                    // DNF: 1 = normal, 0 = negated (capitalized)
+                    if (ims[i].term[x] == 1) {
+                        printf("%c", var);
+                    } else {
+                        printf("%c", toupper(var));
+                    }
+                } else {
+                    // KNF: 0 = normal, 1 = negated (capitalized)
+                    if (ims[i].term[x] == 0) {
+                        printf("%c", var);
+                    } else {
+                        printf("%c", toupper(var));
+                    }
+                }
+            }
+        }
+
+        if (!type) {
+            printf(")");
+        }
+
+        if (i+1<imsCount) {
+            if (type) {
+                printf(" + ");
+            } else {
+                printf(" · ");
+            }
+        }
+    }
+    printf("\n");
+}
 
 // expands all terms to min/max terms
 // then saves into array as int
@@ -34,41 +106,172 @@ int parse(const char *term, u_int8_t *terms, int vars, int index) {
     return index;
 }
 
-// helpers
-void printout(const u_int8_t *terms,int count){
-  for (int i=0;i<count;i++){
-    printf("%d",terms[i]);
-  }
-   printf("\n");
-}
-
-// implicant / implicat stuct to save the minimized terms 
-// (-1 for don't care)
-struct {
-    int term[32];
-    bool minimized;
-    bool minimizing;
-} Im;
-
 // check for difference between two terms by one
-bool diff(const u_int8_t *term1, const u_int8_t *term2, int vars, int *diffIndex){
+bool diff(const uint8_t *term1, const uint8_t *term2, int vars, int *diffIndex){
     int diffCount = 0;
-    for (int i=0;i<vars;i++){
-        if (term1[i] == term2[i]){
+    for (int i = 0; i < vars; i++){
+        if (term1[i] != term2[i]){
             diffCount++;
             *diffIndex = i;
         }
     }
-    return (diffCount==1);
+    if (diffCount != 1) return false;
+    // ensure diff is a 0/1 flip (not don't care flip)
+    uint8_t a = term1[*diffIndex];
+    uint8_t b = term2[*diffIndex];
+    if ((a==0&&b==1)||(a==1&&b==0)) {
+        return true;
+    }
+    return false;
 }
 
 // Quine-McCluskey minimization
-int quineMcCluskey(const u_int8_t *terms, int count, int vars){
-    int numMinTerms = count/vars;
-    
-    return 0;
+int quineMcCluskey(const u_int8_t *terms, int termsCount, Im *ims, int vars){
+    int imsCount = termsCount;
+    for (int i=0;i<imsCount;i++){
+        for (int x=0;x<vars;x++){
+            ims[i].term[x] = terms[i*vars + x];
+        }
+    }
+
+    bool done = false;
+    while (!done){
+        done = true;
+        Im new[imsCount];
+        int newCount = 0;
+        for (int i=0;i<imsCount;i++){
+            for (int x=0;x<imsCount;x++){
+                int diffIndex = -1;
+                if (diff(ims[i].term,ims[x].term,vars,&diffIndex)){
+                    done = false;
+                    // when found two with only one diff create new Im with 2 for the irelevant one
+                    Im merged;
+                    for (int y=0;y<vars;y++){
+                        merged.term[y] = (y==diffIndex) ? 2 : ims[i].term[y];
+                    }
+                    // remove duplicates from next itaration
+                    bool exists = false;
+                    for (int y=0;y<newCount;y++){
+                        if (memcmp(merged.term, new[y].term, sizeof(merged.term)) == 0){
+                            exists = true;
+                            break;
+                        }
+                    }
+
+                    if (!exists){
+                        new[newCount++] = merged;
+                    }
+                }
+            }
+        }
+        // check if there are still terms being minimized
+        if (!done){
+            imsCount = newCount;
+            for (int i=0;i<newCount;i++){
+                ims[i] = new[i];
+            }
+        }
+    }
+    return imsCount;
 }
 
+// check for cover of Im by term
+bool covers(const uint8_t *im, const uint8_t *term, int vars) {
+    for (int i = 0; i < vars; i++) {
+        if (im[i] != 2 && im[i] != term[i]) {
+            return false;
+        }
+    }
+    return true;
+}
+
+void findMinCover(const u_int8_t chart[256][256], int imsCount, int termsCount, int currIm, int currCount, bool currSelection[256],bool covTerms[256], Solution *sol){
+    // if the current is greater than the best found return
+    if (currCount >= sol->count) return;
+    // coverance check
+    bool covered = true;
+    for (int i=0;i<termsCount;i++){
+        if (!covTerms[i]){
+            covered = false;
+            break;
+        }
+    }
+    if (covered){
+        sol->count = currCount;
+        memcpy(sol->selection,currSelection,sizeof(bool)*imsCount);
+        return;
+    }
+    // try include of currIm if it covers at least one uncovered Term
+    bool better = false;
+    bool newCovTerms[256];
+    memcpy(newCovTerms,covTerms,sizeof(bool)*termsCount);
+    for (int i=0;i<termsCount;i++){
+        if (chart[currIm][i] && !covTerms[i]){
+            newCovTerms[i] = true;
+            better = true;
+        }
+    }
+    if (better){
+        currSelection[currIm] = true;
+        findMinCover(chart,imsCount,termsCount,currIm+1,currCount+1,currSelection,newCovTerms,sol);
+        currSelection[currIm] = false;
+    }
+    // try exclude of currIm
+    findMinCover(chart,imsCount,termsCount,currIm+1,currCount,currSelection,newCovTerms,sol);
+}
+
+int selectTerms(const u_int8_t *terms, int termsCount, Im *ims, int imsCount, int vars){
+    u_int8_t chart[256][256] = {0};
+    // build initial coverance chart
+    for (int i=0;i<imsCount;i++){
+        for (int x=0;x<termsCount;x++){
+            if (covers(ims[i].term,&terms[x*vars],vars)){
+                chart[i][x] = 1;
+            }
+        }
+    }
+    // track selected ims and terms covered
+    bool currSelection[imsCount];
+    int currCount = 0;
+    bool covTerms[termsCount];
+    // find the ims that are not covered by others (Kernal Im)
+    bool foundKI = true;
+    while (foundKI){
+        foundKI = false;
+        for (int i=0; i<termsCount;i++){
+            if (covTerms[i]) continue;
+            int covIm = -1;
+            int count = 0; // how ims cover the term
+            for (int x=0;x<imsCount;x++){
+                if (chart[x][i]){
+                    count++;
+                    covIm = x;
+                }
+            }
+            // count is one then it is a KI
+            if (count==1 && !currSelection[covIm]){
+                foundKI = true;
+                currSelection[covIm] = true;
+                currCount++;
+                // mark all terms covered by KI
+                for (int x=0;x<termsCount;x++){
+                    if (chart[covIm][x]){
+                        covTerms[x] = true;
+                    }
+                }
+            }
+        }
+    }
+    // reduce the remaining ims to only the ones needed
+    Solution sol;
+    sol.count = 999; // large value needed so that the algo start properly
+    memset(sol.selection,0,sizeof(sol.selection));
+    findMinCover(chart,imsCount,termsCount,0,currCount,currSelection,covTerms,&sol);
+    for (int i=0;i<imsCount;i++){
+        ims[i].essential = sol.selection[i];
+    }
+    return sol.count;
+}
 // first param is num of variables
 // second param is 1 for DNF and 0 for KNF
 // the folowing are the terms
@@ -76,23 +279,35 @@ int main(int argc,char *argv[]){
   if (argc<4){
     printf("Please give all Parameters:\n\n");
     printf("\tfirst: number of variables\n");
-    printf("\tsecond: 1 for DNF or 0 for KNF\n");
+    printf("\tsecond: name of variables (this is for the final output) (ex: abcd) (the output puts the negated vars as capital letters)\n");
+    printf("\tthird: 1 for DNF or 0 for KNF\n");
     printf("\tlast: all terms with 0 being negation and 1 being normal\n\n");
     printf("\tnotation: if you dont specify all variables in a term use '_' to replace the missing variable so that the length of each terms is the same\n");
     return 1;
   }
 
   int vars = atoi(argv[1]);
-  int type = atoi(argv[2]);
+  int type = atoi(argv[3]);
+  char varNames[vars];
+  for (int i=0;i<vars;i++){
+      varNames[i] = argv[2][i];
+  }
   u_int8_t terms[8192] = {0};
   int index = 0;
 
-  for (int i=3;i<argc;i++) {
+  for (int i=4;i<argc;i++) {
     index = parse(argv[i],terms,vars,index);
     if (index == -1){
       return -1;
     }
   }
 
-  printout(terms,index);
+  //printout(terms,index);
+
+  int termsCount = index/vars;
+  Im ims[termsCount];
+  int imsCount = quineMcCluskey(terms,termsCount,ims,vars);
+  imsCount = selectTerms(terms,termsCount,ims,imsCount,vars);
+  
+  printdone(ims,imsCount,type,varNames,vars);
 }
