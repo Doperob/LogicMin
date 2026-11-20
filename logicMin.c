@@ -4,6 +4,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+#define TERMS 8192
+
 // implicant / implicat stuct to save the minimized terms 
 // (2 for don't care)
 typedef struct {
@@ -13,7 +15,7 @@ typedef struct {
 // solution memory for recursive optimisation
 typedef struct {
     int count;
-    bool selection[256];
+    bool selection[TERMS];
 } Solution;
 
 // helpers
@@ -29,10 +31,25 @@ void printout(const u_int8_t *terms, int count){
 void printdone(const Im *ims, int imsCount, int type, const char *varNames, int vars){
     bool firstTerm = true;
     for (int i = 0; i < imsCount; i++){
+        if (!ims[i].essential) continue;
         if (!type) {
             printf("(");
         }
+        if (!i && !type) printf("Your KMF is: ");
+        if (!i && type) printf("Your DMF is: ");
         bool firstLiteral = true;
+        
+        bool allTwos = true;
+        for (int x = 0; x < vars; x++) {
+            if (ims[i].term[x] != 2) {
+                allTwos = false;
+                break;
+            }
+        }
+        if (allTwos) {
+            printf("1");
+        }
+        
         for (int x = 0; x < vars; x++){
             if (ims[i].term[x] != 2) {
                 if (!firstLiteral) {
@@ -41,6 +58,7 @@ void printdone(const Im *ims, int imsCount, int type, const char *varNames, int 
                     }
                 }
                 firstLiteral = false;
+                
                 char var = varNames[x];
                 if (type == 1) {
                     // DNF: 1 = normal, 0 = negated (capitalized)
@@ -64,7 +82,14 @@ void printdone(const Im *ims, int imsCount, int type, const char *varNames, int 
             printf(")");
         }
 
-        if (i+1<imsCount) {
+        bool last = true;
+        for (int x=i+1;x<imsCount;x++){
+            if (ims[x].essential){
+                last = false;
+            }
+        }
+
+        if (!last) {
             if (type) {
                 printf(" + ");
             } else {
@@ -133,17 +158,21 @@ int quineMcCluskey(const u_int8_t *terms, int termsCount, Im *ims, int vars){
             ims[i].term[x] = terms[i*vars + x];
         }
     }
-
+    Im primes[TERMS];
+    int primesCount = 0;
     bool done = false;
     while (!done){
         done = true;
-        Im new[imsCount];
+        Im new[TERMS];
         int newCount = 0;
+        bool combined[TERMS] = {0};
         for (int i=0;i<imsCount;i++){
             for (int x=0;x<imsCount;x++){
                 int diffIndex = -1;
                 if (diff(ims[i].term,ims[x].term,vars,&diffIndex)){
                     done = false;
+                    combined[i] = true;
+                    combined[x] = true;
                     // when found two with only one diff create new Im with 2 for the irelevant one
                     Im merged;
                     for (int y=0;y<vars;y++){
@@ -157,10 +186,24 @@ int quineMcCluskey(const u_int8_t *terms, int termsCount, Im *ims, int vars){
                             break;
                         }
                     }
-
                     if (!exists){
                         new[newCount++] = merged;
                     }
+                }
+            }
+        }
+        // Collect uncombined terms as prime implicants
+        for (int i=0; i<imsCount; i++) {
+            if (!combined[i]) {
+                bool exists = false;
+                for (int y=0; y<primesCount; y++) {
+                    if (memcmp(ims[i].term, primes[y].term, sizeof(primes[y].term)) == 0) {
+                        exists = true;
+                        break;
+                    }
+                }
+                if (!exists) {
+                    primes[primesCount++] = ims[i];
                 }
             }
         }
@@ -172,7 +215,11 @@ int quineMcCluskey(const u_int8_t *terms, int termsCount, Im *ims, int vars){
             }
         }
     }
-    return imsCount;
+    // Copy collected prime implicants back to ims
+    for (int i=0; i<primesCount; i++) {
+        ims[i] = primes[i];
+    }
+    return primesCount;
 }
 
 // check for cover of Im by term
@@ -185,7 +232,7 @@ bool covers(const uint8_t *im, const uint8_t *term, int vars) {
     return true;
 }
 
-void findMinCover(const u_int8_t chart[256][256], int imsCount, int termsCount, int currIm, int currCount, bool currSelection[256],bool covTerms[256], Solution *sol){
+void findMinCover(const u_int8_t chart[TERMS][TERMS], int imsCount, int termsCount, int currIm, int currCount, bool currSelection[TERMS],bool covTerms[TERMS], Solution *sol){
     // if the current is greater than the best found return
     if (currCount >= sol->count) return;
     // coverance check
@@ -201,9 +248,10 @@ void findMinCover(const u_int8_t chart[256][256], int imsCount, int termsCount, 
         memcpy(sol->selection,currSelection,sizeof(bool)*imsCount);
         return;
     }
+    if (currIm >= imsCount) return;
     // try include of currIm if it covers at least one uncovered Term
     bool better = false;
-    bool newCovTerms[256];
+    bool newCovTerms[termsCount];
     memcpy(newCovTerms,covTerms,sizeof(bool)*termsCount);
     for (int i=0;i<termsCount;i++){
         if (chart[currIm][i] && !covTerms[i]){
@@ -217,11 +265,15 @@ void findMinCover(const u_int8_t chart[256][256], int imsCount, int termsCount, 
         currSelection[currIm] = false;
     }
     // try exclude of currIm
-    findMinCover(chart,imsCount,termsCount,currIm+1,currCount,currSelection,newCovTerms,sol);
+    findMinCover(chart,imsCount,termsCount,currIm+1,currCount,currSelection,covTerms,sol);
 }
 
 int selectTerms(const u_int8_t *terms, int termsCount, Im *ims, int imsCount, int vars){
-    u_int8_t chart[256][256] = {0};
+    // allocate engough memory to solve
+    u_int8_t (*chart)[TERMS] = malloc(sizeof(u_int8_t) * TERMS * TERMS);
+    if (!chart) return 0;
+    memset(chart, 0, sizeof(u_int8_t) * TERMS * TERMS);
+    
     // build initial coverance chart
     for (int i=0;i<imsCount;i++){
         for (int x=0;x<termsCount;x++){
@@ -231,9 +283,9 @@ int selectTerms(const u_int8_t *terms, int termsCount, Im *ims, int imsCount, in
         }
     }
     // track selected ims and terms covered
-    bool currSelection[imsCount];
+    bool currSelection[TERMS] = {false};
     int currCount = 0;
-    bool covTerms[termsCount];
+    bool covTerms[TERMS] = {false};
     // find the ims that are not covered by others (Kernal Im)
     bool foundKI = true;
     while (foundKI){
@@ -270,6 +322,7 @@ int selectTerms(const u_int8_t *terms, int termsCount, Im *ims, int imsCount, in
     for (int i=0;i<imsCount;i++){
         ims[i].essential = sol.selection[i];
     }
+    free(chart); // free up allocated memory
     return sol.count;
 }
 // first param is num of variables
@@ -277,22 +330,21 @@ int selectTerms(const u_int8_t *terms, int termsCount, Im *ims, int imsCount, in
 // the folowing are the terms
 int main(int argc,char *argv[]){
   if (argc<4){
-    printf("Please give all Parameters:\n\n");
-    printf("\tfirst: number of variables\n");
-    printf("\tsecond: name of variables (this is for the final output) (ex: abcd) (the output puts the negated vars as capital letters)\n");
-    printf("\tthird: 1 for DNF or 0 for KNF\n");
-    printf("\tlast: all terms with 0 being negation and 1 being normal\n\n");
-    printf("\tnotation: if you dont specify all variables in a term use '_' to replace the missing variable so that the length of each terms is the same\n");
+    printf("Please give all Parameters!\n");
     return 1;
   }
 
   int vars = atoi(argv[1]);
   int type = atoi(argv[3]);
+  if (type!=0 && type!=1){
+      printf("Invalid type of output (Parameter 3)");
+      return 1;
+  }
   char varNames[vars];
   for (int i=0;i<vars;i++){
       varNames[i] = argv[2][i];
   }
-  u_int8_t terms[8192] = {0};
+  u_int8_t terms[TERMS] = {0};
   int index = 0;
 
   for (int i=4;i<argc;i++) {
@@ -305,7 +357,7 @@ int main(int argc,char *argv[]){
   //printout(terms,index);
 
   int termsCount = index/vars;
-  Im ims[termsCount];
+  Im ims[TERMS];
   int imsCount = quineMcCluskey(terms,termsCount,ims,vars);
   imsCount = selectTerms(terms,termsCount,ims,imsCount,vars);
   
